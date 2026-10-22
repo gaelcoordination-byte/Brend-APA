@@ -214,6 +214,7 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
     <div>
       <h1>Dépistages diabète et HTA</h1>
       <p>Fiches patient, suivi des positifs et indicateurs</p>
+      <p id="syncLine" hidden></p>
     </div>
   </header>
   <nav class="tabs" aria-label="Sections">
@@ -229,25 +230,49 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
 
+<script src="config.js"></script>
 <script>
-/* Stockage local : reproduit l'interface de base de données utilisée par l'application, dans le navigateur de l'appareil. */
+/* Stockage local + synchronisation en ligne facultative (script Google). Reproduit l'interface de base de données de l'application. */
 (function(){
   if(window.claude&&window.claude.use) return;
   window.__LOCAL__=true;
-  var KEY='cpts-depistages-donnees-v1', mem=null, listeners=[];
+  var KEY='cpts-depistages-donnees-v1', MKEY='cpts-depistages-sync-v1', CKEY='cpts-depistages-code-v1';
+  var COLLS=['depistages','interventions','apa'];
+  /* Champs qui restent sur l'appareil et ne sont jamais envoyés en ligne */
+  var LOCAL_ONLY_RESTREINT={depistages:['nom','tel','medecinNom','complexe','remarques'],interventions:[],
+    apa:['profession','types','pathoTxt','douleurTxt','tttTxt','freinAutre','motivAutre','souhaits','objAutre','synthese']};
+  var CFG=window.CPTS_CONFIG||{}, mem=null, listeners=[];
+  var LOCAL_ONLY=CFG.syncAll?{depistages:[],interventions:[],apa:[]}:LOCAL_ONLY_RESTREINT;
   function load(){ try{ var s=localStorage.getItem(KEY); return s?JSON.parse(s):{}; }catch(e){ return mem||{}; } }
   var data=load();
-  function save(){ try{ localStorage.setItem(KEY,JSON.stringify(data)); mem=null; }catch(e){ mem=data; if(window.__onStorageError) window.__onStorageError(); throw {code:'unavailable',message:'Stockage plein ou indisponible'}; } }
+  function save(){ try{ localStorage.setItem(KEY,JSON.stringify(data)); mem=null; }catch(e){ mem=data; throw {code:'unavailable',message:'Stockage plein ou indisponible'}; } }
   function notify(){ listeners.slice().forEach(function(f){ try{ f(); }catch(e){ console.error(e); } }); }
-  window.addEventListener('storage',function(e){ if(e.key===KEY){ data=load(); notify(); } });
   var clone=function(o){ return JSON.parse(JSON.stringify(o)); };
   var rid=function(){ return 'd'+Date.now().toString(36)+Math.random().toString(36).slice(2,9); };
+  var okId=function(id){ return typeof id==='string'&&/^[A-Za-z0-9_\-.~:@+]{1,200}$/.test(id); };
+
+  /* ---- métadonnées de synchronisation ---- */
+  function loadMeta(){ try{ var m=JSON.parse(localStorage.getItem(MKEY)||'{}'); return {since:m.since||0,dirty:m.dirty||{},last:m.last||0}; }catch(e){ return {since:0,dirty:{},last:0}; } }
+  function saveMeta(m){ try{ localStorage.setItem(MKEY,JSON.stringify(m)); }catch(e){} }
+  function getCode(){ try{ return localStorage.getItem(CKEY)||''; }catch(e){ return ''; } }
+  function setCode(c){ try{ if(c) localStorage.setItem(CKEY,c); else localStorage.removeItem(CKEY); }catch(e){} }
+  var configured=function(){ return !!CFG.syncUrl; };
+  var enabled=function(){ return configured()&&!!getCode(); };
+  var st={status:'idle'};
+  function setStatus(s){ st.status=s; if(window.__onSync) try{ window.__onSync(); }catch(e){} }
+
+  function touch(name,id,deleted){
+    var now=Date.now(), key=name+'/'+id;
+    if(deleted){ data.__tomb=data.__tomb||{}; var prev=data.__tomb[key]||0; data.__tomb[key]=Math.max(now,prev+1); }
+    else { var d=data[name][id]; d.majLe=Math.max(now,(d.majLe||0)+1); }
+    if(enabled()){ var m=loadMeta(); m.dirty[key]=1; saveMeta(m); schedule(1500); }
+  }
   function docRef(name,id){
     return {id:id,path:name+'/'+id,
       get:async function(){ var c=data[name]||{}; var has=Object.prototype.hasOwnProperty.call(c,id); return {id:id,exists:has,data:function(){return has?c[id]:undefined;}}; },
-      set:async function(d){ (data[name]=data[name]||{})[id]=clone(d); save(); notify(); },
-      update:async function(d){ if(!data[name]||!data[name][id]) throw {code:'invalid_argument',message:'Document inexistant'}; Object.assign(data[name][id],clone(d)); save(); notify(); },
-      delete:async function(){ if(data[name]&&data[name][id]){ delete data[name][id]; save(); notify(); } }
+      set:async function(d){ var b=clone(d); delete b.majLe; (data[name]=data[name]||{})[id]=b; if(data.__tomb) delete data.__tomb[name+'/'+id]; touch(name,id); save(); notify(); },
+      update:async function(d){ if(!data[name]||!data[name][id]) throw {code:'invalid_argument',message:'Document inexistant'}; Object.assign(data[name][id],clone(d)); touch(name,id); save(); notify(); },
+      delete:async function(){ if(data[name]&&data[name][id]){ delete data[name][id]; touch(name,id,true); save(); notify(); } }
     };
   }
   function coll(name){
@@ -260,6 +285,82 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
         return function(){ listeners=listeners.filter(function(x){return x!==f;}); };
       }};
   }
+
+  /* ---- synchronisation ---- */
+  function publicPart(c,d){ var o=clone(d); delete o.majLe; (LOCAL_ONLY[c]||[]).forEach(function(f){ delete o[f]; }); return o; }
+  function currentMaj(key){ var p=key.split('/'), d=(data[p[0]]||{})[p.slice(1).join('/')]; if(d) return d.majLe||0; return (data.__tomb&&data.__tomb[key])||0; }
+  function applyRemote(r){
+    if(!r||COLLS.indexOf(r.c)<0||!okId(r.id)) return false;
+    var key=r.c+'/'+r.id, cur=(data[r.c]||{})[r.id], maj=Number(r.maj)||0, tomb=(data.__tomb&&data.__tomb[key])||0;
+    if(r.del){
+      if(cur&&(cur.majLe||0)>maj) return false;
+      var had=!!cur; if(had) delete data[r.c][r.id];
+      data.__tomb=data.__tomb||{}; if((data.__tomb[key]||0)<maj) data.__tomb[key]=maj;
+      return had;
+    }
+    if(cur&&(cur.majLe||0)>=maj) return false;
+    if(!cur&&tomb>=maj) return false;
+    var nd=(r.d&&typeof r.d==='object')?clone(r.d):{};
+    (LOCAL_ONLY[r.c]||[]).forEach(function(f){ delete nd[f]; if(cur&&cur[f]!==undefined) nd[f]=cur[f]; });
+    nd.majLe=maj; (data[r.c]=data[r.c]||{})[r.id]=nd;
+    if(data.__tomb) delete data.__tomb[key];
+    return true;
+  }
+  async function post(payload){
+    var ctl=new AbortController(), to=setTimeout(function(){ ctl.abort(); },30000);
+    try{
+      var r=await fetch(CFG.syncUrl,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(payload),redirect:'follow',signal:ctl.signal});
+      if(!r.ok) throw new Error('http '+r.status);
+      return await r.json();
+    } finally { clearTimeout(to); }
+  }
+  var syncing=false, again=false, timer=null;
+  function schedule(ms){ clearTimeout(timer); timer=setTimeout(function(){ sync(); },ms); }
+  async function sync(){
+    if(!enabled()) return 'off';
+    if(syncing){ again=true; return 'busy'; }
+    syncing=true; setStatus('sync');
+    try{
+      var meta=loadMeta(), sent=[], docs=[];
+      Object.keys(meta.dirty).forEach(function(key){
+        var p=key.split('/'), c=p[0], id=p.slice(1).join('/'), d=(data[c]||{})[id];
+        if(d){ sent.push({key:key,maj:d.majLe||0}); docs.push({c:c,id:id,maj:d.majLe||0,del:false,d:publicPart(c,d)}); }
+        else if(data.__tomb&&data.__tomb[key]){ sent.push({key:key,maj:data.__tomb[key]}); docs.push({c:c,id:id,maj:data.__tomb[key],del:true,d:{}}); }
+      });
+      var res=await post({code:getCode(),since:meta.since,docs:docs});
+      if(!res||!res.ok){ if(res&&res.error==='code'){ setStatus('code'); return 'code'; } setStatus('error'); return 'error'; }
+      var changed=false; (res.docs||[]).forEach(function(r){ if(applyRemote(r)) changed=true; });
+      var m2=loadMeta();
+      sent.forEach(function(s){ if(currentMaj(s.key)===s.maj) delete m2.dirty[s.key]; });
+      m2.since=res.now; m2.last=Date.now(); saveMeta(m2);
+      try{ save(); }catch(e){}
+      setStatus('ok'); if(changed) notify();
+      return 'ok';
+    }catch(e){ setStatus(navigator.onLine===false?'offline':'error'); return 'error'; }
+    finally{ syncing=false; if(again){ again=false; schedule(800); } }
+  }
+  async function enable(code){
+    setCode(code);
+    var m={since:0,dirty:{},last:0};
+    COLLS.forEach(function(c){ Object.keys(data[c]||{}).forEach(function(id){ var d=data[c][id]; if(!d.majLe) d.majLe=Date.now(); m.dirty[c+'/'+id]=1; }); });
+    Object.keys(data.__tomb||{}).forEach(function(k){ m.dirty[k]=1; });
+    saveMeta(m); try{ save(); }catch(e){}
+    var r=await sync();
+    if(r!=='ok'){ setCode(''); saveMeta({since:0,dirty:{},last:0}); setStatus('idle'); }
+    return r;
+  }
+  function disable(){ setCode(''); saveMeta({since:0,dirty:{},last:0}); setStatus('idle'); }
+
+  window.addEventListener('storage',function(e){ if(e.key===KEY){ data=load(); notify(); } });
+  window.addEventListener('online',function(){ if(enabled()) schedule(500); });
+  document.addEventListener('visibilitychange',function(){ if(!document.hidden&&enabled()) schedule(500); });
+  setInterval(function(){ if(!document.hidden&&enabled()) sync(); },60000);
+  if(enabled()) setTimeout(function(){ sync(); },900);
+
+  window.__sync={
+    configured:configured, enabled:enabled, localOnly:function(){ return !CFG.syncAll; }, enable:enable, disable:disable, syncNow:sync,
+    status:function(){ var m=loadMeta(); return {status:st.status,last:m.last,pending:Object.keys(m.dirty).length}; }
+  };
   var db={collection:coll,doc:function(p){ var s=p.split('/'); return docRef(s[0],s[1]); }};
   var downloads={save:async function(req){
     var ext=(req.filename.split('.').pop()||'').toLowerCase();
@@ -295,6 +396,9 @@ var editingId=null, editingApaId=null, apaFicheId='', dirty=false, saving=false;
 var queues={};
 var LAST_KEY='cpts-depistage-dernier';
 var LOCAL=!!window.__LOCAL__;
+var SY=window.__sync||null;
+function nameLocal(){ return !!(LOCAL&&SY&&SY.enabled()&&SY.localOnly()); }
+function cloudAll(){ return !!(LOCAL&&SY&&SY.enabled()&&!SY.localOnly()); }
 
 /* ---------- Règles métier (fiche papier) ---------- */
 function tensionVals(f){ var v=[]; ['d','g'].forEach(function(k){ var s=num(f['sys_'+k]), d=num(f['dia_'+k]); if(s!=null||d!=null) v.push({s:s,d:d}); }); return v; }
@@ -373,8 +477,13 @@ function renderBanner(){
   else if(loadError) h='<div class="banner bad"><span>Lecture des données impossible ('+esc(loadError)+'). Rechargez la page.</span></div>';
   else if(!ready) h='<div class="banner info"><span>Chargement des données…</span></div>';
   else if(!canWrite) h='<div class="banner warn"><span>Lecture seule : votre accès ne permet pas de saisir ou de modifier des fiches. Demandez un accès « Contributeur » au propriétaire.</span></div>';
-  if(LOCAL&&ready&&(S.fiches.length+S.apa.length)>0&&(Date.now()-lastBackup())>7*864e5)
-    h+='<div class="banner warn"><span>Les fiches sont enregistrées sur cet appareil uniquement. Pensez à faire une sauvegarde.</span><button class="btn sm" data-do="backup">Sauvegarder maintenant</button></div>';
+  if(LOCAL&&ready&&!cloudAll()&&(S.fiches.length+S.apa.length)>0&&(Date.now()-lastBackup())>7*864e5)
+    h+='<div class="banner warn"><span>'+(nameLocal()?'Le nom, le téléphone et les textes libres ne sont enregistrés que sur cet appareil. Pensez à faire une sauvegarde.':'Les fiches sont enregistrées sur cet appareil uniquement. Pensez à faire une sauvegarde.')+'</span><button class="btn sm" data-do="backup">Sauvegarder maintenant</button></div>';
+  if(LOCAL&&SY&&SY.configured()){
+    var sst=SY.status().status;
+    if(!SY.enabled()) h+='<div class="banner info"><span>Pour envoyer les fiches en ligne et les partager avec l’équipe, saisissez le code d’équipe.</span><button class="btn sm" data-go="history">Saisir le code</button></div>';
+    else if(sst==='code') h+='<div class="banner bad"><span>Le code d’équipe est refusé. Saisissez-le à nouveau.</span><button class="btn sm" data-do="syncOff">Saisir le code</button></div>';
+  }
   var demo=S.fiches.some(function(f){return f.demo;})||S.interv.some(function(i){return i.demo;})||S.apa.some(function(a){return a.demo;});
   if(demo&&!loadError) h+='<div class="banner info"><span>Des données d’exemple sont affichées. Elles faussent les indicateurs tant qu’elles sont là.</span>'+(canWrite?'<button class="btn sm" data-do="unseed">Supprimer les exemples</button>':'')+'</div>';
   $('#banner').innerHTML=h;
@@ -448,10 +557,10 @@ function cardHTML(f){
   var s=statut(f), id=f.id, r=rappelsOf(f), n=attempts(f), iv=intervById(f.interv), ap=apaFor(f.id);
   var fk=function(a,i){return esc(id+':'+a+(i==null?'':i));};
   var reasons=[]; if(tensionPos(f)===true) reasons.push('Tension '+tensionTxt(f)); if(glyPos(f)===true) reasons.push('Glycémie '+glyTxt(f));
-  var h='<article class="card" data-id="'+esc(id)+'"><header><div><h3>'+(f.nom?esc(f.nom):'<span class="muted">Nom non renseigné</span>')+'</h3>'+
+  var h='<article class="card" data-id="'+esc(id)+'"><header><div><h3>'+(f.nom?esc(f.nom):'<span class="muted">'+(nameLocal()?'Nom conservé sur le téléphone de saisie':'Nom non renseigné')+'</span>')+'</h3>'+
     '<div class="meta">'+fmtDate(f.date)+(iv?' · '+esc(iv.lieu||''):'')+' · '+esc(SEXE[f.sexe]||'')+(f.age!=null?', '+f.age+' ans':'')+'</div></div>'+chip(s.tone,s.label)+'</header>';
   h+='<div class="facts"><div><b>Motif :</b> '+esc(reasons.join(' ; '))+'</div>'+
-     '<div><b>Téléphone :</b> '+(f.tel?'<span style="user-select:all">'+esc(f.tel)+'</span>':'<span class="muted">non renseigné</span>')+(f.rappel==='non'?' · ne souhaite pas être rappelé':'')+'</div>'+
+     '<div><b>Téléphone :</b> '+(f.tel?'<span style="user-select:all">'+esc(f.tel)+'</span>':'<span class="muted">'+(nameLocal()?'non disponible sur cet appareil':'non renseigné')+'</span>')+(f.rappel==='non'?' · ne souhaite pas être rappelé':'')+'</div>'+
      '<div><b>Médecin traitant :</b> '+(f.medecin==='oui'?esc(f.medecinNom||'oui, nom non renseigné'):(f.medecin==='non'?'aucun':'<span class="muted">non renseigné</span>'))+'</div>'+
      (f.complexe?'<div><b>Situation complexe :</b> '+esc(f.complexe)+'</div>':'')+
      (f.remarques?'<div><b>Remarques :</b> '+esc(f.remarques)+'</div>':'')+'</div>';
@@ -484,7 +593,28 @@ function suiviHTML(){
 }
 
 /* ---------- Fiches enregistrées ---------- */
-function histHTML(){ return histInner()+backupPanelHTML(); }
+function agoTxt(ts){ if(!ts) return ''; var m=Math.round((Date.now()-ts)/60000); if(m<1) return 'à l’instant'; if(m<60) return 'il y a '+m+' min'; var h=Math.round(m/60); return h<24?'il y a '+h+' h':'il y a '+Math.round(h/24)+' j'; }
+function syncLineText(){
+  if(!LOCAL||!SY||!SY.configured()||!SY.enabled()) return '';
+  var s=SY.status();
+  if(s.status==='sync') return 'Synchronisation en cours…';
+  if(s.status==='code') return 'Code d’équipe refusé.';
+  if(s.status==='offline') return 'Hors connexion'+(s.pending?' · '+s.pending+' modification'+(s.pending>1?'s':'')+' en attente d’envoi':'');
+  if(s.status==='error') return 'Synchronisation impossible pour le moment, nouvel essai automatique'+(s.pending?' · '+s.pending+' en attente':'');
+  return s.last?'Synchronisé '+agoTxt(s.last)+(s.pending?' · '+s.pending+' en attente':''):'En attente de synchronisation';
+}
+function renderSyncLine(){ var el=$('#syncLine'); if(!el) return; var tx=syncLineText(); el.hidden=!tx; el.textContent=tx; var p=$('#syncText'); if(p) p.textContent=tx; }
+function syncPanelHTML(){
+  if(!LOCAL||!SY||!SY.configured()) return '';
+  var h='<section class="panel" style="margin-top:20px"><h2>Synchronisation en ligne</h2>';
+  if(SY.enabled()){
+    h+='<p class="note" style="margin-bottom:12px">'+(SY.localOnly()?'Les fiches sont envoyées en ligne et partagées avec l’équipe. Le nom, le téléphone, le médecin traitant, la situation complexe, les remarques et les textes libres du bilan APA restent uniquement sur ce téléphone.':'Toutes les données des fiches et des bilans APA, y compris le nom et le téléphone des patients, sont envoyées en ligne et partagées avec l’équipe.')+'</p><p id="syncText" style="margin-bottom:12px">'+esc(syncLineText())+'</p><div class="row"><button class="btn" data-do="syncNow">Synchroniser maintenant</button><button class="btn" data-do="syncOff">Désactiver sur ce téléphone</button></div>';
+  } else {
+    h+='<p class="note" style="margin-bottom:12px">Saisissez le code d’équipe communiqué par la CPTS pour envoyer vos fiches en ligne.'+(SY.localOnly()?' Le nom, le téléphone et les textes libres restent sur ce téléphone.':' Toutes les données, y compris le nom et le téléphone des patients, sont partagées avec l’équipe.')+'</p><div class="row"><div class="fld" style="min-width:220px;flex:1"><label class="l" for="syncCode">Code d’équipe</label><input type="password" id="syncCode" autocomplete="off" autocapitalize="none"></div><button class="btn primary" data-do="syncEnable" style="align-self:flex-end">Activer la synchronisation</button></div>';
+  }
+  return h+'</section>';
+}
+function histHTML(){ return histInner()+syncPanelHTML()+backupPanelHTML(); }
 function histInner(){
   var h='<div class="row sp" style="margin-bottom:16px"><div class="seg seg-tabs" role="group" aria-label="Affichage">'+
     '<label><input type="radio" name="ht" value="fiches" data-do="histTab"'+(histTab==='fiches'?' checked':'')+'><span>Fiches</span></label>'+
@@ -554,7 +684,7 @@ function formHTML(f){
     '<div class="fld" id="medBlock" hidden style="flex:1;min-width:200px"><label class="l" for="f_med">Docteur</label><input type="text" id="f_med" name="medecinNom" value="'+esc(f.medecinNom||'')+'"></div></div>'+
     '<label class="chk"><input type="checkbox" name="carte" id="f_carte"'+(f.carte?' checked':'')+'><span>Carte remise au patient, à présenter à son médecin traitant</span></label>'+
     '<div class="fld"><label class="l" for="f_cx">Situation complexe</label><input type="text" id="f_cx" name="complexe" value="'+esc(f.complexe||'')+'" placeholder="Isolement, absence de couverture, barrière de la langue…"></div>'+
-    '<div class="fld" id="posBlock" hidden><label class="l" for="f_nom">Si positif : nom et prénom</label><input type="text" id="f_nom" name="nom" value="'+esc(f.nom||'')+'"><span class="hint">Nécessaire pour rappeler le patient. Ce dépistage positif sera ajouté au suivi.</span></div>'+
+    '<div class="fld" id="posBlock" hidden><label class="l" for="f_nom">Si positif : nom et prénom</label><input type="text" id="f_nom" name="nom" value="'+esc(f.nom||'')+'"><span class="hint">Nécessaire pour rappeler le patient. Ce dépistage positif sera ajouté au suivi.'+(nameLocal()?' Le nom et le téléphone restent sur ce téléphone et ne sont pas envoyés en ligne.':(cloudAll()?' Le nom et le téléphone sont envoyés en ligne et partagés avec l’équipe.':''))+'</span></div>'+
     '<div class="fld"><label class="l" for="f_rem">Remarques et commentaires</label><textarea id="f_rem" name="remarques">'+esc(f.remarques||'')+'</textarea></div>'+
     
     '<label class="chk"><input type="checkbox" name="consent" id="f_consent"'+(f.consent?' checked':'')+'><span>Le patient a été informé du traitement de ses données (RGPD) et a donné son accord. Cette case remplace la signature de la fiche papier.</span></label>'+
@@ -812,7 +942,7 @@ async function importBackup(input){
 }
 function backupPanelHTML(){
   return '<section class="panel" style="margin-top:20px"><h2>Sauvegarde et regroupement</h2><p class="note" style="margin-bottom:12px">'+
-    (LOCAL?'Les fiches sont enregistrées sur cet appareil uniquement. Faites une sauvegarde régulière : un téléphone perdu ou réinitialisé efface les fiches. ':'')+
+    (LOCAL?(cloudAll()?'Les fiches sont aussi enregistrées en ligne. Une sauvegarde reste possible, par précaution. ':(nameLocal()?'Les données chiffrées des fiches sont aussi envoyées en ligne, mais le nom, le téléphone et les textes libres ne sont que sur cet appareil : faites une sauvegarde régulière, car un téléphone perdu ou réinitialisé les efface. ':'Les fiches sont enregistrées sur cet appareil uniquement. Faites une sauvegarde régulière : un téléphone perdu ou réinitialisé efface les fiches. ')):'')+
     'Pour regrouper les saisies de plusieurs personnes, chacune envoie son fichier de sauvegarde à la personne chargée des indicateurs, qui l’importe ici. Ce fichier contient toutes les données des fiches : ne l’envoyez que par un canal sécurisé.</p>'+
     '<div class="row"><button class="btn" data-do="backup">Sauvegarder mes données</button>'+(canWrite?'<button class="btn" data-do="importPick">Importer une sauvegarde</button><label class="chk"><input type="checkbox" id="impReplace"> Remplacer les fiches déjà présentes</label>':'')+'</div>'+
     '<input type="file" id="impFile" accept=".json,application/json" hidden></section>';
@@ -937,6 +1067,10 @@ document.addEventListener('click',function(e){
   else if(act==='addIvAdmin'){ createIntervention($('#ivDate').value,$('#ivLieu').value).then(function(id){ if(id){ toast('Intervention ajoutée.'); render(); } }); }
   else if(act==='resetForm'){ buildForm(); }
   else if(act==='resetApa'){ buildApaForm(); }
+  else if(act==='syncNow'){ SY.syncNow().then(function(r){ if(r==='ok') toast('Synchronisé.'); else if(r==='code') toast('Code d’équipe refusé.',true); else if(r!=='busy') toast('Synchronisation impossible pour le moment.',true); render(); }); }
+  else if(act==='syncOff'){ SY.disable(); toast('Synchronisation désactivée sur ce téléphone.'); render(); renderSyncLine(); }
+  else if(act==='syncEnable'){ var cde=(($('#syncCode')||{}).value||'').trim(); if(!cde){ toast('Saisissez le code d’équipe.',true); return; } b.disabled=true;
+    SY.enable(cde).then(function(r){ if(r==='ok') toast('Synchronisation activée.'); else if(r==='code') toast('Code d’équipe incorrect.',true); else toast('Connexion impossible. Vérifiez le réseau et réessayez.',true); render(); renderSyncLine(); }); }
   else if(act==='backup') exportBackup();
   else if(act==='importPick'){ $('#impFile').click(); }
   else if(act==='newApa') go('apa',{ficheId:arg});
@@ -985,6 +1119,8 @@ async function init(){
   db.collection('interventions').onSnapshot(function(snap){ S.interv=snap.docs.map(function(d){return Object.assign({id:d.id},d.data());}); renderSoon(); },onErr);
   db.collection('apa').onSnapshot(function(snap){ S.apa=snap.docs.map(function(d){return Object.assign({id:d.id},d.data());}); renderSoon(); },onErr);
 }
+window.__onSync=function(){ renderSyncLine(); };
+setInterval(renderSyncLine,30000);
 init();
 if('serviceWorker' in navigator&&/^https?:$/.test(location.protocol)){ window.addEventListener('load',function(){ navigator.serviceWorker.register('sw.js').catch(function(){}); }); }
 })();
