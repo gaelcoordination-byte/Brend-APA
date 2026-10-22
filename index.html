@@ -192,6 +192,7 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
 .sub-h{font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:600;margin-bottom:6px}
 .rap{display:grid;gap:8px;grid-template-columns:auto minmax(0,150px) minmax(0,1fr) auto;align-items:center;padding:4px 0}
 .rap .rn{font-size:14px;font-weight:600;white-space:nowrap}
+.rap .rcom{grid-column:1/-1}
 @media (max-width:640px){.rap{grid-template-columns:1fr 1fr}.rap .rn{grid-column:1/-1}.rap .chk{grid-column:1/-1}}
 .steps{display:grid;gap:8px 20px;grid-template-columns:repeat(auto-fit,minmax(min(100%,280px),1fr))}
 .step{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
@@ -413,8 +414,8 @@ function glyTxt(f){ var g=num(f.glycemie); if(g==null) return ''; return fmtNum(
 var SEXE={femme:'Femme',homme:'Homme',nr:'Non précisé'};
 function intervById(id){ return S.interv.find(function(i){return i.id===id;}); }
 function intervLabel(i){ return fmtDate(i.date)+' · '+(i.lieu||'Sans lieu'); }
-function rappelsOf(f){ var r=(f.rappels||[]).concat([{},{},{}]).slice(0,3); return r.map(function(x){return Object.assign({date:'',par:'',abouti:false},x||{});}); }
-function attempts(f){ return rappelsOf(f).filter(function(r){return r.date||r.par||r.abouti;}).length; }
+function rappelsOf(f){ var r=(f.rappels||[]).concat([{},{},{}]).slice(0,3); return r.map(function(x){return Object.assign({date:'',par:'',abouti:false,com:''},x||{});}); }
+function attempts(f){ return rappelsOf(f).filter(function(r){return r.date||r.par||r.abouti||r.com;}).length; }
 function joint(f){ return rappelsOf(f).some(function(r){return r.abouti;}); }
 function statut(f){
   if(f.traitement) return {key:'trt',label:'Traitement mis en place',tone:'ok',rank:5};
@@ -548,7 +549,7 @@ function suiviList(){
   var pos=S.fiches.filter(isPositif);
   var f=suiviFilter;
   var list=pos.filter(function(x){ var s=statut(x).key;
-    if(f==='all') return true; if(f==='pdv') return s==='pdv'; if(f==='trt') return s==='trt'; return s!=='trt'&&s!=='pdv'; });
+    if(f==='all') return true; if(f==='pdv') return s==='pdv'; if(f==='trt') return s==='trt'; if(f==='joint') return s==='att'||s==='mt'; return s==='arap'||s==='cours'; });
   list.sort(function(a,b){ return statut(a).rank-statut(b).rank || (a.date||'').localeCompare(b.date||''); });
   return {pos:pos,list:list};
 }
@@ -569,7 +570,8 @@ function cardHTML(f){
   h+='<div><div class="sub-h">Rappels du patient</div>'+r.map(function(x,i){
     return '<div class="rap"><span class="rn">Rappel '+(i+1)+'</span><input type="date" data-act="rdate" data-i="'+i+'" data-fk="'+fk('rdate',i)+'" value="'+esc(x.date)+'" aria-label="Date du rappel '+(i+1)+'"'+(canWrite?'':' disabled')+'>'+
       '<input type="text" data-act="rpar" data-i="'+i+'" data-fk="'+fk('rpar',i)+'" value="'+esc(x.par)+'" placeholder="Rappelé par" aria-label="Rappelé par (rappel '+(i+1)+')"'+(canWrite?'':' disabled')+'>'+
-      '<label class="chk"><input type="checkbox" data-act="rok" data-i="'+i+'" data-fk="'+fk('rok',i)+'"'+(x.abouti?' checked':'')+(canWrite?'':' disabled')+'> Patient joint</label></div>'; }).join('')+'</div>';
+      '<label class="chk"><input type="checkbox" data-act="rok" data-i="'+i+'" data-fk="'+fk('rok',i)+'"'+(x.abouti?' checked':'')+(canWrite?'':' disabled')+'> Patient joint</label>'+
+      '<input type="text" class="rcom" data-act="rcom" data-i="'+i+'" data-fk="'+fk('rcom',i)+'" value="'+esc(x.com||'')+'" placeholder="Commentaire (facultatif)" aria-label="Commentaire du rappel '+(i+1)+'"'+(canWrite?'':' disabled')+'></div>'; }).join('')+'</div>';
   var dis=canWrite?'':' disabled';
   h+='<div><div class="sub-h">Suite donnée</div><div class="steps">'+
     '<div class="step"><label class="chk"><input type="checkbox" data-act="mt" data-fk="'+fk('mt')+'"'+(f.consultMT?' checked':'')+dis+'> Consultation chez le MT</label>'+(f.consultMT?'<input type="date" data-act="mtdate" data-fk="'+fk('mtdate')+'" value="'+esc(f.consultMTDate||'')+'" aria-label="Date de la consultation"'+dis+'>':'')+'</div>'+
@@ -584,9 +586,9 @@ function cardHTML(f){
 function suiviHTML(){
   var d=suiviList(), pos=d.pos;
   var c=function(key){ return pos.filter(function(x){return statut(x).key===key;}).length; };
-  var toFollow=pos.filter(function(x){var k=statut(x).key;return k!=='trt'&&k!=='pdv';}).length;
+  var toFollow=pos.filter(function(x){var k=statut(x).key;return k==='arap'||k==='cours';}).length, nJoint=pos.filter(function(x){var k=statut(x).key;return k==='att'||k==='mt';}).length;
   var h='<div class="filters"><div class="f"><label class="l" for="sf">Afficher</label><select id="sf" data-do="suiviFilter">'+
-    [['toFollow','À suivre ('+toFollow+')'],['pdv','Perdus de vue ('+c('pdv')+')'],['trt','Traitement en place ('+c('trt')+')'],['all','Tous les positifs ('+pos.length+')']].map(function(o){return '<option value="'+o[0]+'"'+(suiviFilter===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+
+    [['toFollow','À rappeler ('+toFollow+')'],['joint','Patients joints ('+nJoint+')'],['pdv','Perdus de vue ('+c('pdv')+')'],['trt','Traitement en place ('+c('trt')+')'],['all','Tous les positifs ('+pos.length+')']].map(function(o){return '<option value="'+o[0]+'"'+(suiviFilter===o[0]?' selected':'')+'>'+o[1]+'</option>';}).join('')+
     '</select></div></div>';
   if(!d.list.length) return h+'<div class="empty"><h2>Aucun patient dans cette liste</h2><p class="muted">Les patients dont le dépistage est positif apparaissent ici automatiquement.</p></div>';
   return h+'<div class="cards">'+d.list.map(cardHTML).join('')+'</div>';
@@ -961,13 +963,13 @@ function exportIndic(){
   saveFile('indicateurs-depistages-'+todayISO()+'.csv',toCSV(rows));
 }
 function exportFiches(){
-  var head=['Date','Intervention','Réalisé par','Sexe','Âge','ATCD familiaux HTA','ATCD familiaux diabète','HTA connue','Diabète connu','Traitement HTA','Traitement diabète','Tension bras droit','Tension bras gauche','Délai depuis le repas','Glycémie (g/L)','Résultat','Rappel souhaité','Téléphone','Situation complexe','Médecin traitant','Nom du médecin','Carte remise (médecin traitant)','Nom et prénom','Rappel 1','Rappel 2','Rappel 3','Patient joint','Consultation MT','Date consultation MT','Traitement mis en place','Date traitement','Adaptation du traitement','Date adaptation','Bilan APA','Date bilan APA','Perdu de vue','Remarques'];
+  var head=['Date','Intervention','Réalisé par','Sexe','Âge','ATCD familiaux HTA','ATCD familiaux diabète','HTA connue','Diabète connu','Traitement HTA','Traitement diabète','Tension bras droit','Tension bras gauche','Délai depuis le repas','Glycémie (g/L)','Résultat','Rappel souhaité','Téléphone','Situation complexe','Médecin traitant','Nom du médecin','Carte remise (médecin traitant)','Nom et prénom','Rappel 1','Rappel 2','Rappel 3','Commentaire rappel 1','Commentaire rappel 2','Commentaire rappel 3','Patient joint','Consultation MT','Date consultation MT','Traitement mis en place','Date traitement','Adaptation du traitement','Date adaptation','Bilan APA','Date bilan APA','Perdu de vue','Remarques'];
   var yn=function(v){return v==='oui'?'Oui':(v==='non'?'Non':'');};
   var rows=[head].concat(S.fiches.slice().sort(function(a,b){return (a.date||'').localeCompare(b.date||'');}).map(function(f){ var iv=intervById(f.interv), r=rappelsOf(f), pos=isPositif(f);
     return [fmtDate(f.date),iv?iv.lieu:'',f.par||'',SEXE[f.sexe]||'',f.age==null?'':f.age,yn(f.atcdHta),yn(f.atcdDia),yn(f.connuHta),yn(f.connuDia),yn(f.ttHta),yn(f.ttDia),
       (num(f.sys_d)!=null||num(f.dia_d)!=null)?bp({s:num(f.sys_d),d:num(f.dia_d)}):'',(num(f.sys_g)!=null||num(f.dia_g)!=null)?bp({s:num(f.sys_g),d:num(f.dia_g)}):'',
       f.delai==='plus2h'?'Plus de 2 h':(f.delai==='moins2h'?'Moins de 2 h':''),f.glycemie==null?'':String(f.glycemie).replace('.',','),pos?'Positif':'Négatif',yn(f.rappel),f.tel||'',f.complexe||'',yn(f.medecin),f.medecinNom||'',f.carte?'Oui':'Non',f.nom||'',
-      r[0].date?fmtDate(r[0].date):'',r[1].date?fmtDate(r[1].date):'',r[2].date?fmtDate(r[2].date):'',pos?(joint(f)?'Oui':'Non'):'',pos?(f.consultMT?'Oui':'Non'):'',f.consultMTDate?fmtDate(f.consultMTDate):'',pos?(f.traitement?'Oui':'Non'):'',f.traitementDate?fmtDate(f.traitementDate):'',pos?(f.adaptation?'Oui':'Non'):'',f.adaptationDate?fmtDate(f.adaptationDate):'',apaFor(f.id)?'Oui':'Non',apaFor(f.id)?fmtDate(apaFor(f.id).date):'',pos?(f.perdu?'Oui':'Non'):'',f.remarques||'']; }));
+      r[0].date?fmtDate(r[0].date):'',r[1].date?fmtDate(r[1].date):'',r[2].date?fmtDate(r[2].date):'',r[0].com||'',r[1].com||'',r[2].com||'',pos?(joint(f)?'Oui':'Non'):'',pos?(f.consultMT?'Oui':'Non'):'',f.consultMTDate?fmtDate(f.consultMTDate):'',pos?(f.traitement?'Oui':'Non'):'',f.traitementDate?fmtDate(f.traitementDate):'',pos?(f.adaptation?'Oui':'Non'):'',f.adaptationDate?fmtDate(f.adaptationDate):'',apaFor(f.id)?'Oui':'Non',apaFor(f.id)?fmtDate(apaFor(f.id).date):'',pos?(f.perdu?'Oui':'Non'):'',f.remarques||'']; }));
   saveFile('fiches-depistages-'+todayISO()+'.csv',toCSV(rows));
 }
 
@@ -1091,9 +1093,9 @@ document.addEventListener('change',function(e){
   var card=t.closest('[data-id]'); if(!card) return;
   var id=card.dataset.id, f=S.fiches.find(function(x){return x.id===id;}); if(!f) return;
   var i=d.i!=null?parseInt(d.i,10):null, today=todayISO();
-  if(d.act==='rdate'||d.act==='rpar'||d.act==='rok'){
+  if(d.act==='rdate'||d.act==='rpar'||d.act==='rok'||d.act==='rcom'){
     var r=rappelsOf(f);
-    if(d.act==='rdate') r[i].date=t.value; else if(d.act==='rpar') r[i].par=t.value.trim(); else r[i].abouti=t.checked;
+    if(d.act==='rdate') r[i].date=t.value; else if(d.act==='rpar') r[i].par=t.value.trim(); else if(d.act==='rcom') r[i].com=t.value.trim(); else r[i].abouti=t.checked;
     var p={rappels:r}; if(d.act==='rok'&&t.checked){ p.perdu=false; if(!r[i].date) r[i].date=today; }
     patch(id,p); render();
   }
