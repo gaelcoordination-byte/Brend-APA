@@ -1,1 +1,1 @@
-window.CPTS_CONFIG={syncUrl:"https://script.google.com/macros/s/AKfycbwyduVsXbPo1vKjOUxfOuLWF-wtOEYDhuTL9-2rmHT16L-_Xyl4AoLEmXScuZaimiVf4A/exec",syncAll:true};
+window.CPTS_CONFIG={syncUrl:"https://script.google.com/macros/s/AKfycbwZHydJdDyI3CLgMDa-45PUr7gLPs--cFQEZDtZ5EMjniFt6k3I9LFcHekop3uD8oQzcg/exec",syncAll:true};
