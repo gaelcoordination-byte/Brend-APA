@@ -350,6 +350,14 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
     if(r!=='ok'){ setCode(''); saveMeta({since:0,dirty:{},last:0}); setStatus('idle'); }
     return r;
   }
+  async function resync(){
+    if(!enabled()) return 'off';
+    var m={since:0,dirty:{},last:0};
+    COLLS.forEach(function(c){ Object.keys(data[c]||{}).forEach(function(id){ var d=data[c][id]; if(!d.majLe) d.majLe=Date.now(); m.dirty[c+'/'+id]=1; }); });
+    Object.keys(data.__tomb||{}).forEach(function(k){ m.dirty[k]=1; });
+    saveMeta(m); try{ save(); }catch(e){}
+    return await sync();
+  }
   function disable(){ setCode(''); saveMeta({since:0,dirty:{},last:0}); setStatus('idle'); }
 
   window.addEventListener('storage',function(e){ if(e.key===KEY){ data=load(); notify(); } });
@@ -359,7 +367,7 @@ input::placeholder,textarea::placeholder{color:var(--muted);opacity:.8}
   if(enabled()) setTimeout(function(){ sync(); },900);
 
   window.__sync={
-    configured:configured, enabled:enabled, localOnly:function(){ return !CFG.syncAll; }, enable:enable, disable:disable, syncNow:sync,
+    configured:configured, enabled:enabled, localOnly:function(){ return !CFG.syncAll; }, enable:enable, disable:disable, syncNow:sync, resync:resync,
     status:function(){ var m=loadMeta(); return {status:st.status,last:m.last,pending:Object.keys(m.dirty).length}; }
   };
   var db={collection:coll,doc:function(p){ var s=p.split('/'); return docRef(s[0],s[1]); }};
@@ -610,7 +618,7 @@ function syncPanelHTML(){
   if(!LOCAL||!SY||!SY.configured()) return '';
   var h='<section class="panel" style="margin-top:20px"><h2>Synchronisation en ligne</h2>';
   if(SY.enabled()){
-    h+='<p class="note" style="margin-bottom:12px">'+(SY.localOnly()?'Les fiches sont envoyées en ligne et partagées avec l’équipe. Le nom, le téléphone, le médecin traitant, la situation complexe, les remarques et les textes libres du bilan APA restent uniquement sur ce téléphone.':'Toutes les données des fiches et des bilans APA, y compris le nom et le téléphone des patients, sont envoyées en ligne et partagées avec l’équipe.')+'</p><p id="syncText" style="margin-bottom:12px">'+esc(syncLineText())+'</p><div class="row"><button class="btn" data-do="syncNow">Synchroniser maintenant</button><button class="btn" data-do="syncOff">Désactiver sur ce téléphone</button></div>';
+    h+='<p class="note" style="margin-bottom:12px">'+(SY.localOnly()?'Les fiches sont envoyées en ligne et partagées avec l’équipe. Le nom, le téléphone, le médecin traitant, la situation complexe, les remarques et les textes libres du bilan APA restent uniquement sur ce téléphone.':'Toutes les données des fiches et des bilans APA, y compris le nom et le téléphone des patients, sont envoyées en ligne et partagées avec l’équipe.')+'</p><p id="syncText" style="margin-bottom:12px">'+esc(syncLineText())+'</p><div class="row"><button class="btn" data-do="syncNow">Synchroniser maintenant</button><button class="btn" data-do="syncFull">Tout resynchroniser</button><button class="btn" data-do="syncOff">Désactiver sur ce téléphone</button></div>';
   } else {
     h+='<p class="note" style="margin-bottom:12px">Saisissez le code d’équipe communiqué par la CPTS pour envoyer vos fiches en ligne.'+(SY.localOnly()?' Le nom, le téléphone et les textes libres restent sur ce téléphone.':' Toutes les données, y compris le nom et le téléphone des patients, sont partagées avec l’équipe.')+'</p><div class="row"><div class="fld" style="min-width:220px;flex:1"><label class="l" for="syncCode">Code d’équipe</label><input type="password" id="syncCode" autocomplete="off" autocapitalize="none"></div><button class="btn primary" data-do="syncEnable" style="align-self:flex-end">Activer la synchronisation</button></div>';
   }
@@ -1070,6 +1078,7 @@ document.addEventListener('click',function(e){
   else if(act==='resetForm'){ buildForm(); }
   else if(act==='resetApa'){ buildApaForm(); }
   else if(act==='syncNow'){ SY.syncNow().then(function(r){ if(r==='ok') toast('Synchronisé.'); else if(r==='code') toast('Code d’équipe refusé.',true); else if(r!=='busy') toast('Synchronisation impossible pour le moment.',true); render(); }); }
+  else if(act==='syncFull'){ toast('Resynchronisation en cours…'); SY.resync().then(function(r){ if(r==='ok') toast('Tout est resynchronisé.'); else if(r==='code') toast('Code d’équipe refusé.',true); else if(r!=='busy') toast('Synchronisation impossible pour le moment.',true); render(); renderSyncLine(); }); }
   else if(act==='syncOff'){ SY.disable(); toast('Synchronisation désactivée sur ce téléphone.'); render(); renderSyncLine(); }
   else if(act==='syncEnable'){ var cde=(($('#syncCode')||{}).value||'').trim(); if(!cde){ toast('Saisissez le code d’équipe.',true); return; } b.disabled=true;
     SY.enable(cde).then(function(r){ if(r==='ok') toast('Synchronisation activée.'); else if(r==='code') toast('Code d’équipe incorrect.',true); else toast('Connexion impossible. Vérifiez le réseau et réessayez.',true); render(); renderSyncLine(); }); }
