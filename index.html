@@ -690,7 +690,7 @@ function formHTML(f){
     '<div class="fld" style="width:150px"><label class="l" for="f_gly">Taux (g/L)</label><input type="text" id="f_gly" name="glycemie" inputmode="decimal" placeholder="1,25" value="'+(f.glycemie==null?'':esc(String(f.glycemie).replace('.',',')))+'"></div></div>'+
     '<div class="result" id="result" aria-live="polite"></div></section>'+
   '<section class="panel formsec"><h2>Suite à donner</h2><div class="stack">'+
-    '<div class="row" id="rapBlock" hidden style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Souhaite être rappelé</span>'+seg('rappel',f.rappel||'')+'</div>'+
+    '<div class="row" id="rapBlock" hidden style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Le patient souhaite-t-il être rappelé ?</span>'+seg('rappel',f.rappel||'',[['oui','Oui, à rappeler'],['non','Non, ne souhaite pas être appelé']])+'</div>'+
     '<div class="fld" id="telBlock" hidden style="flex:1;min-width:200px"><label class="l" for="f_tel">Téléphone</label><input type="tel" id="f_tel" name="tel" inputmode="tel" value="'+esc(f.tel||'')+'"></div></div>'+
     '<div class="row" style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Médecin traitant</span>'+seg('medecin',f.medecin||'')+'</div>'+
     '<div class="fld" id="medBlock" hidden style="flex:1;min-width:200px"><label class="l" for="f_med">Docteur</label><input type="text" id="f_med" name="medecinNom" value="'+esc(f.medecinNom||'')+'"></div></div>'+
