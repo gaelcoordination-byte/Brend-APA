@@ -587,6 +587,7 @@ function cardHTML(f){
     '<div class="step">'+(ap?chip('ok','Bilan APA réalisé le '+fmtDate(ap.date))+(canWrite?'<button class="btn sm" data-do="editApa" data-arg="'+esc(ap.id)+'">Voir le bilan</button>':''):(canWrite?'<button class="btn sm" data-do="newApa" data-arg="'+esc(id)+'">Faire le bilan APA</button>':'<span class="muted">Bilan APA non réalisé</span>'))+'</div>'+
     '<div class="step"><label class="chk"><input type="checkbox" data-act="adapt" data-fk="'+fk('adapt')+'"'+(f.adaptation?' checked':'')+dis+'> Adaptation du traitement</label>'+(f.adaptation?'<input type="date" data-act="adaptdate" data-fk="'+fk('adaptdate')+'" value="'+esc(f.adaptationDate||'')+'" aria-label="Date de l’adaptation du traitement"'+dis+'>':'')+'</div>'+
     '<div class="step"><label class="chk"><input type="checkbox" data-act="carte" data-fk="'+fk('carte')+'"'+(f.carte?' checked':'')+dis+'> Carte remise pour le médecin traitant</label></div>'+
+    '<div class="step">'+(canWrite?'<button class="btn sm" data-do="editFiche" data-arg="'+esc(id)+'">Voir / modifier la fiche</button>':'')+'</div>'+
     '<div class="step">'+(canWrite?'<button class="btn sm'+(f.perdu?'':' danger')+'" data-do="perdu" data-arg="'+esc(id)+'" data-fk="'+fk('perdu')+'">'+(f.perdu?'Retirer « perdu de vue »':'Marquer comme perdu de vue')+'</button>':'')+'</div>'+
     '</div></div></article>';
   return h;
@@ -688,7 +689,7 @@ function formHTML(f){
     '<div class="fld" style="width:150px"><label class="l" for="f_gly">Taux (g/L)</label><input type="text" id="f_gly" name="glycemie" inputmode="decimal" placeholder="1,25" value="'+(f.glycemie==null?'':esc(String(f.glycemie).replace('.',',')))+'"></div></div>'+
     '<div class="result" id="result" aria-live="polite"></div></section>'+
   '<section class="panel formsec"><h2>Suite à donner</h2><div class="stack">'+
-    '<div class="row" style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Souhaite être rappelé</span>'+seg('rappel',f.rappel||'')+'</div>'+
+    '<div class="row" id="rapBlock" hidden style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Souhaite être rappelé</span>'+seg('rappel',f.rappel||'')+'</div>'+
     '<div class="fld" id="telBlock" hidden style="flex:1;min-width:200px"><label class="l" for="f_tel">Téléphone</label><input type="tel" id="f_tel" name="tel" inputmode="tel" value="'+esc(f.tel||'')+'"></div></div>'+
     '<div class="row" style="gap:16px 24px;align-items:flex-start"><div class="fld"><span class="l">Médecin traitant</span>'+seg('medecin',f.medecin||'')+'</div>'+
     '<div class="fld" id="medBlock" hidden style="flex:1;min-width:200px"><label class="l" for="f_med">Docteur</label><input type="text" id="f_med" name="medecinNom" value="'+esc(f.medecinNom||'')+'"></div></div>'+
@@ -732,7 +733,7 @@ function updateForm(){
   var verdict=(tp===null&&gp===null)?'<span class="muted">Saisissez au moins une mesure</span>':(pos?'<span style="color:var(--bad)">Dépistage positif</span>':'<span style="color:var(--ok)">Dépistage négatif</span>');
   lines+='<div class="rl"><span class="big">'+verdict+'</span></div>';
   $('#result').innerHTML=lines;
-  $('#posBlock').hidden=!pos;
+  $('#posBlock').hidden=!pos; $('#rapBlock').hidden=!pos;
 }
 function showErrors(list){
   $('#formErr').innerHTML=list.length?'<div class="err" role="alert"><b>À corriger avant d’enregistrer :</b><ul>'+list.map(function(x){return '<li>'+esc(x)+'</li>';}).join('')+'</ul></div>':'';
@@ -745,7 +746,7 @@ async function saveFiche(){
   if(!d.date) errs.push('La date du dépistage est obligatoire.');
   if(tensionPos(d)===null&&d.glycemie==null) errs.push('Saisissez au moins une mesure : tension ou glycémie.');
   if(d.glycemie!=null&&!d.delai) errs.push('Indiquez le délai depuis le repas pour interpréter la glycémie.');
-  if(d.rappel==='oui'&&!d.tel) errs.push('Indiquez un numéro de téléphone pour le rappel.');
+  if(isPositif(d)&&d.rappel==='oui'&&!d.tel) errs.push('Indiquez un numéro de téléphone pour le rappel.');
   if(!d.consent) errs.push('Cochez la case de consentement du patient (RGPD).');
   showErrors(errs); if(errs.length) return;
   saving=true; var btn=$('#saveBtn'); if(btn) btn.disabled=true;
