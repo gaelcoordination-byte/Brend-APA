@@ -429,9 +429,9 @@ function statut(f){
   if(f.traitement) return {key:'trt',label:'Traitement mis en place',tone:'ok',rank:5};
   if(f.consultMT) return {key:'mt',label:'Consulté chez le médecin traitant',tone:'ok',rank:4};
   if(f.perdu) return {key:'pdv',label:'Perdu de vue',tone:'bad',rank:6};
+  if(f.rappel==='non') return {key:'norap',label:'Rappel non souhaité',tone:'mute',rank:3};
   if(joint(f)) return {key:'att',label:'Joint, consultation à venir',tone:'warn',rank:2};
   if(attempts(f)>0) return {key:'cours',label:'Rappel en cours',tone:'warn',rank:1};
-  if(f.rappel==='non') return {key:'norap',label:'Rappel non souhaité',tone:'mute',rank:3};
   return {key:'arap',label:'À rappeler',tone:'bad',rank:0};
 }
 
@@ -587,6 +587,7 @@ function cardHTML(f){
     '<div class="step">'+(ap?chip('ok','Bilan APA réalisé le '+fmtDate(ap.date))+(canWrite?'<button class="btn sm" data-do="editApa" data-arg="'+esc(ap.id)+'">Voir le bilan</button>':''):(canWrite?'<button class="btn sm" data-do="newApa" data-arg="'+esc(id)+'">Faire le bilan APA</button>':'<span class="muted">Bilan APA non réalisé</span>'))+'</div>'+
     '<div class="step"><label class="chk"><input type="checkbox" data-act="adapt" data-fk="'+fk('adapt')+'"'+(f.adaptation?' checked':'')+dis+'> Adaptation du traitement</label>'+(f.adaptation?'<input type="date" data-act="adaptdate" data-fk="'+fk('adaptdate')+'" value="'+esc(f.adaptationDate||'')+'" aria-label="Date de l’adaptation du traitement"'+dis+'>':'')+'</div>'+
     '<div class="step"><label class="chk"><input type="checkbox" data-act="carte" data-fk="'+fk('carte')+'"'+(f.carte?' checked':'')+dis+'> Carte remise pour le médecin traitant</label></div>'+
+    '<div class="step">'+(canWrite?'<button class="btn sm" data-do="norap" data-arg="'+esc(id)+'">'+(f.rappel==='non'?'Remettre « à rappeler »':'Ne souhaite pas être rappelé')+'</button>':'')+'</div>'+
     '<div class="step">'+(canWrite?'<button class="btn sm" data-do="editFiche" data-arg="'+esc(id)+'">Voir / modifier la fiche</button>':'')+'</div>'+
     '<div class="step">'+(canWrite?'<button class="btn sm'+(f.perdu?'':' danger')+'" data-do="perdu" data-arg="'+esc(id)+'" data-fk="'+fk('perdu')+'">'+(f.perdu?'Retirer « perdu de vue »':'Marquer comme perdu de vue')+'</button>':'')+'</div>'+
     '</div></div></article>';
@@ -1072,6 +1073,7 @@ document.addEventListener('click',function(e){
   else if(act==='editFiche') go('form',{id:arg});
   else if(act==='delFiche') armDelete(b,async function(){ try{ await db.doc('depistages/'+arg).delete(); S.fiches=S.fiches.filter(function(f){return f.id!==arg;}); toast('Fiche supprimée.'); render(); }catch(err){ toast('Suppression impossible.',true); } });
   else if(act==='delIv') armDelete(b,async function(){ try{ await db.doc('interventions/'+arg).delete(); S.interv=S.interv.filter(function(i){return i.id!==arg;}); toast('Intervention supprimée.'); render(); }catch(err){ toast('Suppression impossible.',true); } });
+  else if(act==='norap'){ var g=S.fiches.find(function(x){return x.id===arg;}); if(g){ patch(arg,{rappel:g.rappel==='non'?'oui':'non'}); render(); } }
   else if(act==='perdu'){ var f=S.fiches.find(function(x){return x.id===arg;}); if(f){ patch(arg,{perdu:!f.perdu}); render(); } }
   else if(act==='toggleIv'){ var n=$('#newIv'); n.hidden=!n.hidden; if(!n.hidden) $('#iv_lieu').focus(); }
   else if(act==='addIvInline'){ createIntervention($('#iv_date').value,$('#iv_lieu').value).then(function(id){ if(id){ refreshIntervOptions(); ($('#f_interv')||$('#a_interv')).value=id; $('#newIv').hidden=true; $('#iv_lieu').value=''; toast('Intervention créée.'); } }); }
