@@ -681,7 +681,7 @@ function formHTML(f){
   '<section class="panel formsec"><h2>Antécédents et traitement</h2>'+
     pairYN('Antécédents familiaux','atcdHta',f.atcdHta||'','atcdDia',f.atcdDia||'')+
     pairYN('Connu','connuHta',f.connuHta||'','connuDia',f.connuDia||'')+
-    pairYN('Traitement en cours','ttHta',f.ttHta||'','ttDia',f.ttDia||'')+'</section>'+
+    '<div class="q" id="ttQ" hidden><div class="qt">Traitement en cours</div><div class="pair"><div class="fld" id="ttHtaBlock" hidden><span class="l">HTA</span>'+seg('ttHta',f.ttHta||'')+'</div><div class="fld" id="ttDiaBlock" hidden><span class="l">Diabète</span>'+seg('ttDia',f.ttDia||'')+'</div></div></div></section>'+
   '<section class="panel formsec"><h2>Mesures</h2>'+
     '<div class="sub-h">Prise de la tension (seuil : supérieur à 140/90)</div><div class="grid2">'+
     '<div class="fld"><span class="l">Bras droit</span><div class="bp"><input type="number" name="sys_d" inputmode="numeric" min="0" max="300" placeholder="Systole" aria-label="Bras droit, systolique" value="'+(f.sys_d==null?'':esc(f.sys_d))+'"><span>/</span><input type="number" name="dia_d" inputmode="numeric" min="0" max="200" placeholder="Diastole" aria-label="Bras droit, diastolique" value="'+(f.dia_d==null?'':esc(f.dia_d))+'"><span>mmHg</span></div></div>'+
@@ -714,7 +714,7 @@ function readForm(){
   var form=$('#ficheForm'); var fd=new FormData(form); var o={}; fd.forEach(function(v,k){o[k]=v;});
   var s=function(k){return String(o[k]==null?'':o[k]).trim();};
   return {date:s('date'),interv:s('interv'),par:s('par'),sexe:s('sexe'),age:num(o.age),
-    atcdHta:s('atcdHta'),atcdDia:s('atcdDia'),connuHta:s('connuHta'),connuDia:s('connuDia'),ttHta:s('ttHta'),ttDia:s('ttDia'),
+    atcdHta:s('atcdHta'),atcdDia:s('atcdDia'),connuHta:s('connuHta'),connuDia:s('connuDia'),ttHta:s('connuHta')==='oui'?s('ttHta'):'',ttDia:s('connuDia')==='oui'?s('ttDia'):'',
     sys_d:num(o.sys_d),dia_d:num(o.dia_d),sys_g:num(o.sys_g),dia_g:num(o.dia_g),delai:s('delai'),glycemie:num(o.glycemie),
     rappel:s('rappel'),tel:s('tel'),complexe:s('complexe'),medecin:s('medecin'),medecinNom:s('medecinNom'),nom:s('nom'),remarques:s('remarques'),
     carte:o.carte==='on',consent:o.consent==='on'};
@@ -723,6 +723,7 @@ function updateForm(){
   var form=$('#ficheForm'); if(!form) return;
   var d=readForm();
   $('#telBlock').hidden=d.rappel!=='oui';
+  $('#ttHtaBlock').hidden=d.connuHta!=='oui'; $('#ttDiaBlock').hidden=d.connuDia!=='oui'; $('#ttQ').hidden=d.connuHta!=='oui'&&d.connuDia!=='oui';
   $('#medBlock').hidden=d.medecin!=='oui';
   var tp=tensionPos(d), gp=glyPos(d), pos=tp===true||gp===true;
   var lines='';
